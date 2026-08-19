@@ -6,13 +6,23 @@ on:
     paths:
       - .github/workflows/hermes-pr90122-repair.yml
       - .github/scripts/repair_pr90122.py
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+    paths:
+      - .github/repair-pr90122-trigger
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   repair:
     name: Apply, test, and publish the reviewed repair
+    if: >-
+      github.event_name == 'push' ||
+      github.head_ref == 'automation/trigger-hermes-pr90122'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -38,6 +48,17 @@ jobs:
             echo "ARES_REVIEW_TOKEN is unavailable; refusing to create an unpublishable repair."
             exit 1
           }
+
+      - name: Publish the observable run receipt
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HELPER_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${HELPER_PR_NUMBER}/comments" \
+            -f body="Hermes #90122 repair run started: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - name: Check out the exact reviewed contributor head
         shell: bash
@@ -197,6 +218,17 @@ EOF
             "repos/${SOURCE_PR_REPO}/issues/${SOURCE_PR_NUMBER}/comments" \
             -F body="@$body_file"
           rm -f "$body_file"
+
+      - name: Publish a failure receipt
+        if: failure() && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HELPER_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${HELPER_PR_NUMBER}/comments" \
+            -f body="Hermes #90122 repair run failed. Exact logs: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
 
       - name: Summarize
         shell: bash
